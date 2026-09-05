@@ -19,22 +19,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `truenas_cloudsync_credential`'s `provider_attributes_json` was `Required`
-  with no `Computed`, but `mapResponseToModel` always rewrites it from the
-  server's own echo of the credential (the same drift-suppression pattern
-  `truenas_cloud_sync.attributes_json` uses, correctly marked
-  `Optional`+`Computed` there). TrueNAS does not echo every credential field
-  back verbatim - `acc_cloudsync_credential_test.go`'s own
+- `truenas_cloudsync_credential`'s `mapResponseToModel` always rewrote
+  `provider_attributes_json` from the server's own echo of the credential
+  (the same drift-suppression pattern `cloud_sync.go`/`cloud_backup.go` use
+  for their own, non-sensitive `attributes_json`). TrueNAS masks sensitive
+  fields in that echo - `acc_cloudsync_credential_test.go`'s own
   `ImportStateVerifyIgnore` rationale already says as much ("cloud-credential
-  attributes contain S3/B2/etc secret keys masked on read") - so any create
-  of an S3 (and likely other) credential fails immediately with "Provider
-  produced inconsistent result after apply: .provider_attributes_json:
-  inconsistent values for sensitive attribute", not a corner case. Changed
-  to `Optional`+`Computed`, matching the sibling field. The same
-  `Required`-without-`Computed` shape exists on `reporting_exporter.go`'s
-  `attributes_json` and `keychain_credential.go`'s `attributes` (both also
-  documented as masked-on-read in the same ignore-list), left out of this
-  fix to keep it scoped to the resource that was actually blocking.
+  attributes contain S3/B2/etc secret keys masked on read") - so whenever the
+  planned value for this field was already known (any apply after the
+  upstream access-key/secret-key values it's built from already exist in
+  state, i.e. every apply after the first), `terraform apply` failed
+  outright with "Provider produced inconsistent result after apply:
+  .provider_attributes_json: inconsistent values for sensitive attribute."
+  An initial fix in this same PR marked the field `Optional`+`Computed`
+  (matching `cloud_sync.attributes_json`'s already-correct shape) on the
+  theory that Computed was the missing piece - that didn't hold up: Computed
+  only changes behavior when a field is omitted from config entirely, and
+  this one never is, so the planned value's known-ness (and thus whether the
+  crash fires) never depended on the Required/Optional split. The actual
+  fix is in `mapResponseToModel` itself: it no longer reconstructs
+  `provider_attributes_json` from `cred.Provider` at all, so Create/Update
+  leave it as exactly what was planned and Read/Import leave it as exactly
+  what was already in state - the same "just don't touch it" pattern
+  `user.go` uses for `password` and `iscsi_auth.go` uses for
+  `secret`/`peersecret`. `provider_attributes_json` is back to `Required`
+  (not `Optional`+`Computed`), since nothing about it is actually computed
+  by the provider anymore - `Required` is now the accurate contract. The
+  same `Required`-without-`Computed`-and-reconstructed-from-server shape
+  exists on `reporting_exporter.go`'s `attributes_json` and
+  `keychain_credential.go`'s `attributes` (both also documented as
+  masked-on-read in the same ignore-list), left out of this fix to keep it
+  scoped to the resource that was actually blocking.
 
 - The `timeouts` block did nothing. All 68 resources declared one, and not a
   single CRUD method read it, so `timeouts { create = "45m" }` was accepted,
