@@ -10,9 +10,10 @@
 //   - Users pass e.g.
 //     `provider_attributes_json = jsonencode({ access_key_id = "X",
 //     secret_access_key = "Y" })`.
-//   - On read we filter the server response back down to the keys the user
-//     originally specified (via filterJSONByKeys) so server-side defaults
-//     don't cause phantom drift, same pattern as cloud_backup.go.
+//   - The field is write-only from the API's perspective: TrueNAS masks
+//     sensitive values (e.g. secret_access_key) in its own echo of the
+//     credential, so mapResponseToModel never reconstructs it from the
+//     server response, unlike cloud_backup.go's attributes_json.
 package resources
 
 import (
