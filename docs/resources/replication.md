@@ -49,6 +49,26 @@ The following arguments are supported:
 * `ssh_credentials` - (Optional) SSH credentials ID for remote replication.
 * `naming_schema` - (Optional) Naming schema for matching snapshots on the source (for pull replication).
 * `also_include_naming_schema` - (Optional) Naming schema for snapshots to include (for push replication without periodic snapshot tasks).
+* `replicate` - (Optional) Replicate the whole filesystem tree with `zfs send -R`. TrueNAS only allows `retention_policy = "SOURCE"` with it. Computed from TrueNAS when unset.
+* `properties` - (Optional) Send dataset properties along with the snapshots.
+* `properties_exclude` - (Optional) Dataset properties that are not sent or are discarded on receive. Requires `properties`. Clearing an existing list is not supported.
+* `properties_override` - (Optional) Map of dataset properties to set on the target. Requires `properties`. Clearing an existing map is not supported.
+* `name_regex` - (Optional) Regular expression selecting the source snapshots to replicate, as an alternative to `naming_schema`. TrueNAS only allows `retention_policy` of `SOURCE` or `NONE` with it.
+* `exclude` - (Optional) Child datasets to leave out of a recursive replication. Clearing an existing list is not supported.
+* `readonly` - (Optional) How the target's `readonly` property is handled. Valid values: `SET`, `REQUIRE`, `IGNORE`.
+* `allow_from_scratch` - (Optional) Destroy the target and do a full send when no common snapshot exists.
+* `hold_pending_snapshots` - (Optional) Hold snapshots that have not been replicated yet so retention cannot delete them.
+* `retries` - (Optional) How many times a failed replication is retried.
+* `large_block` - (Optional) Allow blocks larger than 128 KiB in the stream.
+* `compressed` - (Optional) Send blocks in their compressed on-disk form.
+* `embed` - (Optional) Send embedded data blocks.
+* `speed_limit` - (Optional) Limit the transfer to this many bytes per second.
+* `logging_level` - (Optional) Log level of the task. Valid values: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+* `sudo` - (Optional) Use `sudo` for the zfs commands on the remote side.
+* `schedule_minute`, `schedule_hour`, `schedule_dom`, `schedule_month`, `schedule_dow` - (Optional) Cron fields of the schedule used when `auto` is true. If any `schedule_*` attribute is set, unset ones default to minute `0` and `*` for the rest.
+* `schedule_begin`, `schedule_end` - (Optional) Daily window (`HH:MM`) in which the schedule may fire. Default `00:00` to `23:59`.
+
+All of the optional settings above are also computed: when left unset in the configuration they take the value TrueNAS reports, so importing an existing task and planning shows no changes for them.
 * `timeouts` - (Optional) Configuration block for operation timeouts. See [below](#timeouts).
 
 ### Timeouts

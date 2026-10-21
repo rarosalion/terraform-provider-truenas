@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `truenas_replication`: the settings that were on the API but not in the
+  schema: `replicate`, `properties`, `properties_exclude`,
+  `properties_override`, `name_regex`, `exclude`, `readonly`,
+  `allow_from_scratch`, `hold_pending_snapshots`, `retries`, `large_block`,
+  `compressed`, `embed`, `speed_limit`, `logging_level`, `sudo` and the
+  schedule (`schedule_minute`, `schedule_hour`, `schedule_dom`,
+  `schedule_month`, `schedule_dow`, `schedule_begin`, `schedule_end`). Without
+  them a task such as a full-filesystem PULL of a router's root dataset could
+  only be created in the UI. All are optional and computed, so an unset value
+  is not sent and an imported task plans clean.
+
 ### Fixed
+
+- `truenas_replication`: reading an existing task failed to decode the
+  response, because `replication.get_instance` and `replication.query` return
+  `ssh_credentials` as the expanded keychain credential object while create and
+  update return the bare ID. It is now accepted in either form, as
+  `truenas_cloud_sync` already does for `credentials`.
 
 - `truenas_smb_config`: every update of an existing SMB configuration failed
   on TrueNAS 25.10 and older with `search_protocols requires TrueNAS 26.0 or

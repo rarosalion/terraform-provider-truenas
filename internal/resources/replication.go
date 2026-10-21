@@ -8,10 +8,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -56,6 +60,29 @@ type ReplicationResourceModel struct {
 	SSHCredentials          types.Int64    `tfsdk:"ssh_credentials"`
 	NamingSchema            types.List     `tfsdk:"naming_schema"`
 	AlsoIncludeNamingSchema types.List     `tfsdk:"also_include_naming_schema"`
+	Replicate               types.Bool     `tfsdk:"replicate"`
+	Properties              types.Bool     `tfsdk:"properties"`
+	PropertiesExclude       types.List     `tfsdk:"properties_exclude"`
+	PropertiesOverride      types.Map      `tfsdk:"properties_override"`
+	NameRegex               types.String   `tfsdk:"name_regex"`
+	Exclude                 types.List     `tfsdk:"exclude"`
+	Readonly                types.String   `tfsdk:"readonly"`
+	AllowFromScratch        types.Bool     `tfsdk:"allow_from_scratch"`
+	HoldPendingSnapshots    types.Bool     `tfsdk:"hold_pending_snapshots"`
+	Retries                 types.Int64    `tfsdk:"retries"`
+	LargeBlock              types.Bool     `tfsdk:"large_block"`
+	Compressed              types.Bool     `tfsdk:"compressed"`
+	Embed                   types.Bool     `tfsdk:"embed"`
+	SpeedLimit              types.Int64    `tfsdk:"speed_limit"`
+	LoggingLevel            types.String   `tfsdk:"logging_level"`
+	Sudo                    types.Bool     `tfsdk:"sudo"`
+	ScheduleMinute          types.String   `tfsdk:"schedule_minute"`
+	ScheduleHour            types.String   `tfsdk:"schedule_hour"`
+	ScheduleDom             types.String   `tfsdk:"schedule_dom"`
+	ScheduleMonth           types.String   `tfsdk:"schedule_month"`
+	ScheduleDow             types.String   `tfsdk:"schedule_dow"`
+	ScheduleBegin           types.String   `tfsdk:"schedule_begin"`
+	ScheduleEnd             types.String   `tfsdk:"schedule_end"`
 	Timeouts                timeouts.Value `tfsdk:"timeouts"`
 }
 
@@ -190,6 +217,162 @@ func (r *ReplicationResource) Schema(ctx context.Context, _ resource.SchemaReque
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+
+			"replicate": schema.BoolAttribute{
+				Description: "Replicate the whole filesystem tree with `zfs send -R`, including child datasets, snapshots and properties. " +
+					"TrueNAS only allows `retention_policy` of SOURCE together with this. Leave unset to keep the TrueNAS default (or the current value).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"properties": schema.BoolAttribute{
+				Description:   "Send dataset properties along with the snapshots.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"properties_exclude": schema.ListAttribute{
+				Description:   "Dataset properties that are not sent or are discarded on receive. Requires `properties`. Clearing an existing list is not supported.",
+				Optional:      true,
+				Computed:      true,
+				ElementType:   types.StringType,
+				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
+			"properties_override": schema.MapAttribute{
+				Description:   "Dataset properties to set to a fixed value on the target. Requires `properties`. Clearing an existing map is not supported.",
+				Optional:      true,
+				Computed:      true,
+				ElementType:   types.StringType,
+				PlanModifiers: []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
+			},
+			"name_regex": schema.StringAttribute{
+				Description: "Regular expression selecting which source snapshots are replicated, as an alternative to `naming_schema`. " +
+					"TrueNAS only allows `retention_policy` of SOURCE or NONE with it.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"exclude": schema.ListAttribute{
+				Description:   "Child datasets of the sources to leave out of a recursive replication. Clearing an existing list is not supported.",
+				Optional:      true,
+				Computed:      true,
+				ElementType:   types.StringType,
+				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
+			"readonly": schema.StringAttribute{
+				Description: "How the target dataset's `readonly` property is handled: SET makes it read-only, REQUIRE fails if it is not already, IGNORE leaves it alone.",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("SET", "REQUIRE", "IGNORE"),
+				},
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"allow_from_scratch": schema.BoolAttribute{
+				Description:   "Destroy the target and do a full send when no common snapshot exists, instead of failing.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"hold_pending_snapshots": schema.BoolAttribute{
+				Description:   "Hold snapshots that have not been replicated yet so retention cannot delete them.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"retries": schema.Int64Attribute{
+				Description: "How many times a failed replication is retried.",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"large_block": schema.BoolAttribute{
+				Description:   "Allow blocks larger than 128 KiB in the stream (`zfs send -L`).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"compressed": schema.BoolAttribute{
+				Description:   "Send blocks in their compressed on-disk form (`zfs send -c`).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"embed": schema.BoolAttribute{
+				Description:   "Send embedded data blocks (`zfs send -e`).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"speed_limit": schema.Int64Attribute{
+				Description: "Limit the transfer to this many bytes per second.",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"logging_level": schema.StringAttribute{
+				Description: "Log level of the replication task (DEBUG, INFO, WARNING, ERROR). Unset uses the system default.",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("DEBUG", "INFO", "WARNING", "ERROR"),
+				},
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"sudo": schema.BoolAttribute{
+				Description:   "Use `sudo` for the zfs commands on the remote side (SSH transports).",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_minute": schema.StringAttribute{
+				Description:   "Cron minute field of the replication schedule. If any `schedule_*` attribute is set, unset ones default to minute `0`, hour `*`, day-of-month, month and day-of-week `*`, window `00:00` to `23:59`. Only used when `auto` is true.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_hour": schema.StringAttribute{
+				Description:   "Cron hour field of the replication schedule.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_dom": schema.StringAttribute{
+				Description:   "Cron day-of-month field of the replication schedule.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_month": schema.StringAttribute{
+				Description:   "Cron month field of the replication schedule.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_dow": schema.StringAttribute{
+				Description:   "Cron day-of-week field of the replication schedule.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_begin": schema.StringAttribute{
+				Description:   "Start of the daily window (HH:MM) in which the schedule may fire.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"schedule_end": schema.StringAttribute{
+				Description:   "End of the daily window (HH:MM) in which the schedule may fire.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
 		},
 	}
 }
@@ -254,6 +437,28 @@ func (r *ReplicationResource) Create(ctx context.Context, req resource.CreateReq
 		var ains []string
 		resp.Diagnostics.Append(plan.AlsoIncludeNamingSchema.ElementsAs(ctx, &ains, false)...)
 		createReq.AlsoIncludeNamingSchema = ains
+	}
+
+	opts := replicationOptionsFromPlan(ctx, &plan, &resp.Diagnostics)
+	createReq.Replicate = opts.replicate
+	createReq.Properties = opts.properties
+	createReq.PropertiesExclude = opts.propertiesExclude
+	createReq.PropertiesOverride = opts.propertiesOverride
+	createReq.NameRegex = opts.nameRegex
+	createReq.Exclude = opts.exclude
+	createReq.Readonly = opts.readonly
+	createReq.AllowFromScratch = opts.allowFromScratch
+	createReq.HoldPendingSnapshots = opts.holdPendingSnapshots
+	createReq.Retries = opts.retries
+	createReq.LargeBlock = opts.largeBlock
+	createReq.Compressed = opts.compressed
+	createReq.Embed = opts.embed
+	createReq.SpeedLimit = opts.speedLimit
+	createReq.LoggingLevel = opts.loggingLevel
+	createReq.Sudo = opts.sudo
+	createReq.Schedule = opts.schedule
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	tflog.Debug(ctx, "Creating replication task", map[string]interface{}{
@@ -367,6 +572,28 @@ func (r *ReplicationResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 	if !plan.SSHCredentials.IsNull() {
 		updateReq.SSHCredentials = int(plan.SSHCredentials.ValueInt64())
+	}
+
+	opts := replicationOptionsFromPlan(ctx, &plan, &resp.Diagnostics)
+	updateReq.Replicate = opts.replicate
+	updateReq.Properties = opts.properties
+	updateReq.PropertiesExclude = opts.propertiesExclude
+	updateReq.PropertiesOverride = opts.propertiesOverride
+	updateReq.NameRegex = opts.nameRegex
+	updateReq.Exclude = opts.exclude
+	updateReq.Readonly = opts.readonly
+	updateReq.AllowFromScratch = opts.allowFromScratch
+	updateReq.HoldPendingSnapshots = opts.holdPendingSnapshots
+	updateReq.Retries = opts.retries
+	updateReq.LargeBlock = opts.largeBlock
+	updateReq.Compressed = opts.compressed
+	updateReq.Embed = opts.embed
+	updateReq.SpeedLimit = opts.speedLimit
+	updateReq.LoggingLevel = opts.loggingLevel
+	updateReq.Sudo = opts.sudo
+	updateReq.Schedule = opts.schedule
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	repl, err := r.client.UpdateReplication(ctx, id, updateReq)
@@ -523,4 +750,194 @@ func (r *ReplicationResource) mapResponseToModel(ctx context.Context, repl *true
 	} else {
 		model.AlsoIncludeNamingSchema = types.ListNull(types.StringType)
 	}
+
+	model.Replicate = types.BoolValue(repl.Replicate)
+	model.Properties = types.BoolValue(repl.Properties)
+	model.AllowFromScratch = types.BoolValue(repl.AllowFromScratch)
+	model.HoldPendingSnapshots = types.BoolValue(repl.HoldPendingSnapshots)
+	model.LargeBlock = types.BoolValue(repl.LargeBlock)
+	model.Compressed = types.BoolValue(repl.Compressed)
+	model.Embed = types.BoolValue(repl.Embed)
+	model.Sudo = types.BoolValue(repl.Sudo)
+
+	// These attributes are Optional+Computed, so they must always be known
+	// after apply. An empty collection is used rather than null.
+	propsExclude, d := types.ListValueFrom(ctx, types.StringType, nonNilStrings(repl.PropertiesExclude))
+	if !d.HasError() {
+		model.PropertiesExclude = propsExclude
+	}
+	exclude, d := types.ListValueFrom(ctx, types.StringType, nonNilStrings(repl.Exclude))
+	if !d.HasError() {
+		model.Exclude = exclude
+	}
+	override := make(map[string]string, len(repl.PropertiesOverride))
+	for k, v := range repl.PropertiesOverride {
+		override[k] = fmt.Sprint(v)
+	}
+	overrideValue, d := types.MapValueFrom(ctx, types.StringType, override)
+	if !d.HasError() {
+		model.PropertiesOverride = overrideValue
+	}
+
+	model.NameRegex = optionalString(repl.NameRegex)
+	model.Readonly = optionalString(repl.Readonly)
+	if repl.Retries > 0 {
+		model.Retries = types.Int64Value(int64(repl.Retries))
+	} else {
+		model.Retries = types.Int64Null()
+	}
+	if repl.SpeedLimit != nil {
+		model.SpeedLimit = types.Int64Value(int64(*repl.SpeedLimit))
+	} else {
+		model.SpeedLimit = types.Int64Null()
+	}
+	if repl.LoggingLevel != nil {
+		model.LoggingLevel = optionalString(*repl.LoggingLevel)
+	} else {
+		model.LoggingLevel = types.StringNull()
+	}
+
+	if sched := repl.Schedule; sched != nil {
+		model.ScheduleMinute = types.StringValue(sched.Minute)
+		model.ScheduleHour = types.StringValue(sched.Hour)
+		model.ScheduleDom = types.StringValue(sched.Dom)
+		model.ScheduleMonth = types.StringValue(sched.Month)
+		model.ScheduleDow = types.StringValue(sched.Dow)
+		model.ScheduleBegin = optionalString(sched.Begin)
+		model.ScheduleEnd = optionalString(sched.End)
+	} else {
+		model.ScheduleMinute = types.StringNull()
+		model.ScheduleHour = types.StringNull()
+		model.ScheduleDom = types.StringNull()
+		model.ScheduleMonth = types.StringNull()
+		model.ScheduleDow = types.StringNull()
+		model.ScheduleBegin = types.StringNull()
+		model.ScheduleEnd = types.StringNull()
+	}
+}
+
+func optionalString(v string) types.String {
+	if v == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(v)
+}
+
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}
+
+// replicationOptions holds the optional replication settings taken from a
+// plan. A nil pointer or empty value means "not configured", so it is left
+// out of the request and TrueNAS keeps its default (or the current value).
+type replicationOptions struct {
+	replicate            *bool
+	properties           *bool
+	propertiesExclude    []string
+	propertiesOverride   map[string]interface{}
+	nameRegex            string
+	exclude              []string
+	readonly             string
+	allowFromScratch     *bool
+	holdPendingSnapshots *bool
+	retries              *int
+	largeBlock           *bool
+	compressed           *bool
+	embed                *bool
+	speedLimit           *int
+	loggingLevel         string
+	sudo                 *bool
+	schedule             *truenas.ReplicationSchedule
+}
+
+func known(v interface {
+	IsNull() bool
+	IsUnknown() bool
+}) bool {
+	return !v.IsNull() && !v.IsUnknown()
+}
+
+func boolOption(v types.Bool) *bool {
+	if !known(v) {
+		return nil
+	}
+	b := v.ValueBool()
+	return &b
+}
+
+func replicationOptionsFromPlan(ctx context.Context, plan *ReplicationResourceModel, diags *diag.Diagnostics) replicationOptions {
+	opts := replicationOptions{
+		replicate:            boolOption(plan.Replicate),
+		properties:           boolOption(plan.Properties),
+		allowFromScratch:     boolOption(plan.AllowFromScratch),
+		holdPendingSnapshots: boolOption(plan.HoldPendingSnapshots),
+		largeBlock:           boolOption(plan.LargeBlock),
+		compressed:           boolOption(plan.Compressed),
+		embed:                boolOption(plan.Embed),
+		sudo:                 boolOption(plan.Sudo),
+	}
+	if known(plan.PropertiesExclude) {
+		diags.Append(plan.PropertiesExclude.ElementsAs(ctx, &opts.propertiesExclude, false)...)
+	}
+	if known(plan.Exclude) {
+		diags.Append(plan.Exclude.ElementsAs(ctx, &opts.exclude, false)...)
+	}
+	if known(plan.PropertiesOverride) {
+		var override map[string]string
+		diags.Append(plan.PropertiesOverride.ElementsAs(ctx, &override, false)...)
+		if len(override) > 0 {
+			opts.propertiesOverride = make(map[string]interface{}, len(override))
+			for k, v := range override {
+				opts.propertiesOverride[k] = v
+			}
+		}
+	}
+	if known(plan.NameRegex) {
+		opts.nameRegex = plan.NameRegex.ValueString()
+	}
+	if known(plan.Readonly) {
+		opts.readonly = plan.Readonly.ValueString()
+	}
+	if known(plan.Retries) {
+		n := int(plan.Retries.ValueInt64())
+		opts.retries = &n
+	}
+	if known(plan.SpeedLimit) {
+		n := int(plan.SpeedLimit.ValueInt64())
+		opts.speedLimit = &n
+	}
+	if known(plan.LoggingLevel) {
+		opts.loggingLevel = plan.LoggingLevel.ValueString()
+	}
+
+	// Build the schedule only if at least one schedule_* attribute is set.
+	sched := truenas.ReplicationSchedule{
+		Minute: "0", Hour: "*", Dom: "*", Month: "*", Dow: "*",
+		Begin: "00:00", End: "23:59",
+	}
+	any := false
+	for _, f := range []struct {
+		v   types.String
+		dst *string
+	}{
+		{plan.ScheduleMinute, &sched.Minute},
+		{plan.ScheduleHour, &sched.Hour},
+		{plan.ScheduleDom, &sched.Dom},
+		{plan.ScheduleMonth, &sched.Month},
+		{plan.ScheduleDow, &sched.Dow},
+		{plan.ScheduleBegin, &sched.Begin},
+		{plan.ScheduleEnd, &sched.End},
+	} {
+		if known(f.v) {
+			*f.dst = f.v.ValueString()
+			any = true
+		}
+	}
+	if any {
+		opts.schedule = &sched
+	}
+	return opts
 }
